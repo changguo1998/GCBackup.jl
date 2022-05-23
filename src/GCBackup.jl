@@ -18,7 +18,7 @@ module GCBackup
         end
         dirlist  = String[]
         for i in readdir(dir)
-            if isdir(joinpath(dir, i))
+            if isdir(joinpath(dir, i)) && (!islink(joinpath(dir, i)))
                 push!(dirlist, i)
             end
         end
@@ -31,7 +31,7 @@ module GCBackup
         for f in fl
             if !isfile(joinpath(dst, f))
                 if !isdir(dst)
-                    mkdir(dst)
+                    mkpath(dst)
                 end
                 println(joinpath(src, f))
                 cp(joinpath(src, f), joinpath(dst, f))
