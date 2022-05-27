@@ -70,28 +70,32 @@ module GCBackup
         return nothing
     end
 
-    function initbaklist(p::AbstractString = "."; recursive::Bool = false)
+    function initbaklist(p::AbstractString = "."; recursive::Bool = false, exclude::Vector{String}=String[])
         includes = readdir(p)
         searchdir = String[]
         open(joinpath(p, INCLUDEFILENAME), "w") do io
             for s in includes
-                if (s == INCLUDEFILENAME) || (s == IGNOREDIRNAME) || isempty(s)
+                if (s == INCLUDEFILENAME) || (s == IGNOREDIRNAME) || isempty(s) || (s in exclude)
                     continue
                 end
                 if isfile(joinpath(p, s))
                     println(io, s)
                 end
-                if recursive && isdir(joinpath(p, s))
+                if recursive && isdir(joinpath(p, s)) && !(s in exclude)
                     push!(searchdir, s)
                 end
             end
         end
         open(joinpath(p, IGNOREDIRNAME), "w") do io
-            print("")
+            for s in includes
+                if isdir(joinpath(p, s)) && (s in exclude)
+                    println(io, s)
+                end
+            end
         end
         if recursive
             for d in searchdir
-                initbaklist(joinpath(p, d), recursive=true)
+                initbaklist(joinpath(p, d), recursive=true, exclude=exclude)
             end
         end
         return nothing
