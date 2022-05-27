@@ -26,22 +26,24 @@ module GCBackup
         return (filelist, filter(x->!(x in ignlist), dirlist))
     end
 
-    function _collect_file(src::AbstractString, dst::AbstractString)
+    function _collect_file(src::AbstractString, dst::AbstractString, show::Bool)
         (fl, dl) = _read_lists(src)
         for f in fl
             if !isfile(joinpath(dst, f))
                 if !isdir(dst)
                     mkpath(dst)
                 end
-                println(joinpath(src, f))
+                if show
+                    println(joinpath(src, f))
+                end
                 cp(joinpath(src, f), joinpath(dst, f))
             end
         end
         return dl
     end
 
-    function backup(src::AbstractString, dst::AbstractString)
-        ds = _collect_file(src, dst)
+    function backup(src::AbstractString, dst::AbstractString; lshow::Bool = false)
+        ds = _collect_file(src, dst, lshow)
         if !isempty(ds)
             for d in ds
                 backup(joinpath(src, d), joinpath(dst, d))
