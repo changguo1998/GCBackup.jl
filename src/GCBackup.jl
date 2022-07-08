@@ -1,123 +1,125 @@
 module GCBackup
-    export backup, printbaklist, rmbaklist, initbaklist
+using TOML
+export backup, printbaklist, rmbaklist, initbaklist
 
-    const INCLUDEFILENAME = ".gcbakup"
-    const IGNOREDIRNAME  = ".gcbaksearchignore"
+const SETTINGNAME = ".gcbackup.toml"
 
-    function _read_lists(dir::AbstractString)
-        filelist = String[]
-        if isfile(joinpath(dir, INCLUDEFILENAME))
-            t = readlines(joinpath(dir, INCLUDEFILENAME))
-            for i in t
-                if !isempty(i)
-                    if isfile(joinpath(dir, i))
-                        push!(filelist, i)
-                    end
-                end
+function _reg_ex(s::AbstractString)
+    t = replace(s, "." => "\\.")
+    t = replace(t, "*" => ".*")
+    return Regex("^" * t * "\$")
+end
+
+function _regex_in(str::AbstractString, reg::Vector{<:Regex})
+    return any(p -> occursin(p, str), reg)
+end
+
+function _regex_notin(str::AbstractString, reg::Vector{<:Regex})
+    return !any(p -> occursin(p, str), reg)
+end
+
+function _read_setting(dir::AbstractString)
+    if isfile(joinpath(dir, SETTINGNAME))
+        s = TOML.parsefile(joinpath(dir, SETTINGNAME))
+        d4tfile = s["default_include_file"]
+        d4tdir = s["default_include_dir"]
+        file_in = map(_reg_ex, s["include_file"])
+        file_ex = map(_reg_ex, s["exclude_file"])
+        dir_in = map(_reg_ex, s["include_dir"])
+        dir_ex = map(_reg_ex, s["exclude_dir"])
+    else
+        d4tfile = false
+        d4tdir = false
+        file_in = Regex[]
+        file_ex = Regex[]
+        dir_in = Regex[]
+        dir_ex = Regex[]
+    end
+    return (ff=d4tfile, fin=file_in, fex=file_ex, df=d4tdir, din=dir_in, dex=dir_ex)
+end
+
+function _read_lists(dir::AbstractString)
+    setting  = _read_setting(dir)
+    filelist = String[]
+    dirlist  = String[]
+    for f in readdir(dir)
+        apath = joinpath(dir, f)
+        if isdir(apath)
+            if _regex_in(f, setting.din) || (setting.df && _regex_notin(f, setting.dex))
+                push!(dirlist, f)
+            end
+        else
+            if _regex_in(f, setting.fin) || (setting.ff && _regex_notin(f, setting.fex))
+                push!(filelist, f)
             end
         end
-        dirlist  = String[]
-        for i in readdir(dir)
-            if isdir(joinpath(dir, i)) && (!islink(joinpath(dir, i)))
-                push!(dirlist, i)
-            end
-        end
-        ignlist = isfile(joinpath(dir, IGNOREDIRNAME)) ? readlines(joinpath(dir, IGNOREDIRNAME)) : String[]
-        return (filelist, filter(x->!(x in ignlist), dirlist))
+    end
+    return (filelist, dirlist)
+end
+
+function _collect_file(src::AbstractString, dst::AbstractString, show::Bool)
+    (fl, dl) = _read_lists(src)
+    if !isdir(dst)
+        mkpath(dst)
     end
 
-    function _collect_file(src::AbstractString, dst::AbstractString, show::Bool)
-        (fl, dl) = _read_lists(src)
-        for f in fl
-            if !isfile(joinpath(dst, f))
-                if !isdir(dst)
-                    mkpath(dst)
-                end
-                if show
-                    println(joinpath(src, f))
-                end
-                cp(joinpath(src, f), joinpath(dst, f))
+    for f in fl
+        if !isfile(joinpath(dst, f))
+            if show
+                println(joinpath(src, f), " -> ", joinpath(dst, f))
             end
+            cp(joinpath(src, f), joinpath(dst, f))
         end
-        return dl
     end
+    return dl
+end
 
-    function backup(src::AbstractString, dst::AbstractString; lshow::Bool = false)
-        ds = _collect_file(src, dst, lshow)
-        if !isempty(ds)
-            for d in ds
-                backup(joinpath(src, d), joinpath(dst, d))
-            end
+function backup(src::AbstractString, dst::AbstractString; lshow::Bool=false)
+    ds = _collect_file(src, dst, lshow)
+    if !isempty(ds)
+        for d in ds
+            backup(joinpath(src, d), joinpath(dst, d))
         end
-        return nothing
     end
+    return nothing
+end
 
-    function _print_file(src::AbstractString)
-        (fl, dl) = _read_lists(src)
-        for f in fl
-            println(joinpath(src, f))
-        end
-        return dl
+function _print_list(src::AbstractString)
+    (fl, dl) = _read_lists(src)
+    for f in fl
+        println(joinpath(src, f))
     end
+    return dl
+end
 
-    function printbaklist(src::AbstractString=".")
-        ds = _print_file(src)
-        if !isempty(ds)
-            for d in ds
-                printbaklist(joinpath(src, d))
-            end
+function printbaklist(src::AbstractString=".")
+    ds = _print_list(src)
+    if !isempty(ds)
+        for d in ds
+            printbaklist(joinpath(src, d))
         end
-        return nothing
     end
+    return nothing
+end
 
-    function initbaklist(p::AbstractString = "."; recursive::Bool = false, exclude::Vector{String}=String[])
-        includes = readdir(p)
-        searchdir = String[]
-        open(joinpath(p, INCLUDEFILENAME), "w") do io
-            for s in includes
-                if (s == INCLUDEFILENAME) || (s == IGNOREDIRNAME) || isempty(s) || (s in exclude)
-                    continue
-                end
-                if isfile(joinpath(p, s))
-                    println(io, s)
-                end
-                if recursive && isdir(joinpath(p, s)) && !(s in exclude)
-                    push!(searchdir, s)
-                end
-            end
-        end
-        open(joinpath(p, IGNOREDIRNAME), "w") do io
-            for s in includes
-                if isdir(joinpath(p, s)) && (s in exclude)
-                    println(io, s)
-                end
-            end
-        end
-        if recursive
-            for d in searchdir
-                initbaklist(joinpath(p, d), recursive=true, exclude=exclude)
-            end
-        end
-        return nothing
+"""
+initbaklist(p="."; recursive=false, exclude=String[])
+"""
+function initbaklist(p::AbstractString="."; recursive::Bool=false, exclude::Vector{String}=String[])
+    setting = Dict("default_include_file" => true,
+                   "default_include_dir" => true,
+                   "include_file" => String[],
+                   "exclude_file" => exclude,
+                   "include_dir" => String[],
+                   "exclude_dir" => String[])
+    open(joinpath(p, SETTINGNAME), "w") do io
+        TOML.print(io, setting; sorted=true)
     end
-
-    function rmbaklist(dir::AbstractString="."; recursive::Bool = true)
-        if isfile(joinpath(dir, IGNOREDIRNAME))
-            println("rm ", joinpath(dir, IGNOREDIRNAME))
-            rm(joinpath(dir, IGNOREDIRNAME))
+    if recursive
+        for d in filter(isdir, readdir(p; join=true))
+            initbaklist(d; recursive=true, exclude=exclude)
         end
-        if isfile(joinpath(dir, INCLUDEFILENAME))
-            println("rm ", joinpath(dir, INCLUDEFILENAME))
-            rm(joinpath(dir, INCLUDEFILENAME))
-        end
-        if recursive
-            (_, ds) = _read_lists(dir)
-            for d in ds
-                if isdir(joinpath(dir, d))
-                    rmbaklist(joinpath(dir, d); recursive=recursive)
-                end
-            end
-        end
-        return nothing
     end
+    return nothing
+end
 end
