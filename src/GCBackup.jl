@@ -44,7 +44,7 @@ function _read_lists(dir::AbstractString)
     dirlist  = String[]
     for f in readdir(dir)
         apath = joinpath(dir, f)
-        if isdir(apath)
+        if isdir(apath) && !islink(apath)
             if _regex_in(f, setting.din) || (setting.df && _regex_notin(f, setting.dex))
                 push!(dirlist, f)
             end
@@ -105,20 +105,40 @@ end
 """
 initbaklist(p="."; recursive=false, exclude=String[])
 """
-function initbaklist(p::AbstractString="."; recursive::Bool=false, exclude::Vector{String}=String[])
+function initbaklist(p::AbstractString="."; recursive::Bool=false, overwrite::Bool=false, excludefile::Vector{String}=String[],
+    excludedir::Vector{String}=String[])
     setting = Dict("default_include_file" => true,
                    "default_include_dir" => true,
                    "include_file" => String[],
-                   "exclude_file" => exclude,
+                   "exclude_file" => excludefile,
                    "include_dir" => String[],
-                   "exclude_dir" => String[])
+                   "exclude_dir" => excludedir)
+    if (!overwrite) && isfile(joinpath(p, SETTINGNAME))
+        @warn "Setting file already exist in $(p)"
+        return nothing
+    end
     open(joinpath(p, SETTINGNAME), "w") do io
         TOML.print(io, setting; sorted=true)
     end
     if recursive
-        for d in filter(isdir, readdir(p; join=true))
-            initbaklist(d; recursive=true, exclude=exclude)
+        for d in filter(v->isdir(v) && !islink(v), readdir(p; join=true))
+            if _regex_notin(d, _reg_ex.(excludedir))
+                initbaklist(d; recursive=true, overwrite=overwrite, excludefile=excludefile, excludedir=excludedir)
+            end
         end
+    end
+    return nothing
+end
+
+function rmbaklist(dir::AbstractString; recursive::Bool=true)
+    if recursive
+        (_, dl) = _read_lists(dir)
+        for d in dl
+            rmbaklist(joinpath(dir, d))
+        end
+    end
+    if isfile(joinpath(dir, SETTINGNAME))
+        rm(joinpath(dir, SETTINGNAME))
     end
     return nothing
 end
